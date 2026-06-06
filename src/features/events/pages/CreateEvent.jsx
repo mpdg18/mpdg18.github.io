@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
 import Navbar from "../../../shared/components/Navbar";
 import { createEvent } from "../services/eventService";
@@ -21,6 +22,35 @@ const FEATURE_OPTIONS = [
 ];
 
 export default function CreateEvent() {
+  const navigate = useNavigate();
+
+  // Verification guard — runs once on mount
+  useEffect(() => {
+    async function checkAccess() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        navigate("/login");
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      if (profile?.role !== "host" && profile?.role !== "admin") {
+        // Not approved yet — send to verification page
+        navigate("/host-verification");
+      }
+    }
+
+    checkAccess();
+  }, [navigate]);
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [city, setCity] = useState("");

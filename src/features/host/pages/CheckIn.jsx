@@ -1,22 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import jsQR from "jsqr";
 
 import Navbar from "../../../shared/components/Navbar";
 import { supabase } from "../../../services/supabase";
 import { getEventById } from "../../events/services/eventService";
-import { getTicketByCode, checkInTicket } from "../../tickets/services/ticketService";
-import {
-  getEventTickets,
-} from "../../tickets/services/ticketService";
+import { getTicketByCode, checkInTicket, getEventTickets } from "../../tickets/services/ticketService";
 import useMobile from "../../../hooks/useMobile";
 
 export default function CheckIn() {
-  const { id } = useParams(); // event id
+  const { id } = useParams();
   const isMobile = useMobile();
   const navigate = useNavigate();
 
   const [event, setEvent] = useState(null);
-  const [scanResult, setScanResult] = useState(null); // the looked-up ticket
+  const [scanResult, setScanResult] = useState(null);
   const [scanError, setScanError] = useState(null);
   const [checkingIn, setCheckingIn] = useState(false);
   const [checkedIn, setCheckedIn] = useState(false);
@@ -26,10 +24,10 @@ export default function CheckIn() {
   const [tickets, setTickets] = useState([]);
 
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const streamRef = useRef(null);
-  const scanIntervalRef = useRef(null);
+  const animFrameRef = useRef(null);
 
-  // Load event and verify host
   useEffect(() => {
     async function load() {
       const {
@@ -53,18 +51,12 @@ export default function CheckIn() {
       setEvent(result.data);
 
       const ticketResult = await getEventTickets(id);
-      if (ticketResult.data) {
-        setTickets(ticketResult.data);
-      }
+      if (ticketResult.data) setTickets(ticketResult.data);
     }
 
     load();
   }, [id, navigate]);
 
-
-  
-
-  // Cleanup camera on unmount
   useEffect(() => {
     return () => stopCamera();
   }, []);
@@ -73,17 +65,26 @@ export default function CheckIn() {
     setCameraError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: { facingMode: { ideal: "environment" } },
       });
+
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
       setCameraActive(true);
-      startScanning();
-    } catch {
-      setCameraError("Camera access denied or not available.");
+
+      // Wait for next render so videoRef is mounted
+      requestAnimationFrame(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.setAttribute("playsinline", true);
+          videoRef.current.play().then(() => {
+            scanFrame();
+          }).catch((e) => {
+            setCameraError("Could not start video: " + e.message);
+          });
+        }
+      });
+    } catch (e) {
+      setCameraError("Camera access denied. Please allow camera permission and try again.");
     }
   }
 
@@ -92,33 +93,39 @@ export default function CheckIn() {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = null;
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
     }
     setCameraActive(false);
   }
 
-  function startScanning() {
-    // Use BarcodeDetector API if available (Chrome/Edge), fallback to manual input
-    if (!("BarcodeDetector" in window)) return;
+  function scanFrame() {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
 
-    const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+    if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
+      animFrameRef.current = requestAnimationFrame(scanFrame);
+      return;
+    }
 
-    scanIntervalRef.current = setInterval(async () => {
-      if (!videoRef.current || videoRef.current.readyState < 2) return;
+    const ctx = canvas.getContext("2d");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      try {
-        const barcodes = await detector.detect(videoRef.current);
-        if (barcodes.length > 0) {
-          const raw = barcodes[0].rawValue;
-          stopCamera();
-          await processQrData(raw);
-        }
-      } catch {
-        // detector may fail on some frames — that's fine
-      }
-    }, 500);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: "dontInvert",
+    });
+
+    if (code) {
+      stopCamera();
+      processQrData(code.data);
+      return;
+    }
+
+    animFrameRef.current = requestAnimationFrame(scanFrame);
   }
 
   async function processQrData(raw) {
@@ -140,16 +147,24 @@ export default function CheckIn() {
       return;
     }
 
-    // Security: ensure ticket belongs to this event
     if (parsed.eventId !== id) {
       setScanError("This ticket is for a different event.");
       return;
     }
 
-    const { data: ticket, error } = await getTicketByCode(ticketCode);
+    await lookupTicket(ticketCode);
+  }
+
+  async function lookupTicket(code) {
+    const { data: ticket, error } = await getTicketByCode(code);
 
     if (error || !ticket) {
-      setScanError("Ticket not found.");
+      setScanError(`Ticket not found. ${error?.message || ""}`);
+      return;
+    }
+
+    if (ticket.event_id !== id) {
+      setScanError("This ticket belongs to a different event.");
       return;
     }
 
@@ -158,55 +173,27 @@ export default function CheckIn() {
       supabase.from("events").select("*").eq("id", ticket.event_id).single(),
     ]);
 
-    const enriched = { ...ticket, users: userData, events: eventData };
-
-    setScanResult(enriched);
+    setScanResult({ ...ticket, users: userData, events: eventData });
     if (ticket.checked_in) setCheckedIn(true);
   }
 
   async function handleManualLookup() {
     if (!manualCode.trim()) return;
-
     setScanResult(null);
     setScanError(null);
     setCheckedIn(false);
-
-    const { data: ticket, error } = await getTicketByCode(manualCode.trim());
-
-    console.log("Ticket lookup result:", { ticket, error, code: manualCode.trim() });
-
-    if (error || !ticket) {
-      setScanError(`Ticket not found. Error: ${error?.message || "No data returned"}`);
-      setManualCode("");
-      return;
-    }
-
-    // Security: ticket must belong to this event
-    if (ticket.event_id !== id) {
-      setScanError("This ticket belongs to a different event.");
-      setManualCode("");
-      return;
-    }
-
-    // Fetch user and event separately
-    const [{ data: userData }, { data: eventData }] = await Promise.all([
-      supabase.from("users").select("*").eq("id", ticket.user_id).single(),
-      supabase.from("events").select("*").eq("id", ticket.event_id).single(),
-    ]);
-
-    const enriched = {
-      ...ticket,
-      users: userData,
-      events: eventData,
-    };
-
-    setScanResult(enriched);
-    if (ticket.checked_in) setCheckedIn(true);
+    await lookupTicket(manualCode.trim());
     setManualCode("");
   }
 
   async function handleCheckIn() {
     if (!scanResult) return;
+
+    if (scanResult.checked_in || checkedIn) {
+      setScanError("This guest is already checked in.");
+      return;
+    }
+
     setCheckingIn(true);
 
     const { error } = await checkInTicket(scanResult.id);
@@ -218,24 +205,19 @@ export default function CheckIn() {
       setScanResult((prev) => ({ ...prev, checked_in: true }));
 
       const ticketResult = await getEventTickets(id);
-      if (ticketResult.data) {
-        setTickets(ticketResult.data);
-      }
+      if (ticketResult.data) setTickets(ticketResult.data);
     }
 
     setCheckingIn(false);
   }
 
-  const checkedInGuests = tickets.filter((ticket) => ticket.checked_in);
-  const pendingGuests = tickets.filter((ticket) => !ticket.checked_in);
+  const checkedInGuests = tickets.filter((t) => t.checked_in);
+  const pendingGuests = tickets.filter((t) => !t.checked_in);
 
   const pillStyle = {
     background: "#1A1A1A",
     border: "1px solid #232323",
-    padding:
-    isMobile
-      ? "6px 10px"
-      : "8px 14px",
+    padding: isMobile ? "6px 10px" : "8px 14px",
     borderRadius: "999px",
     fontSize: "13px",
   };
@@ -244,6 +226,9 @@ export default function CheckIn() {
     <>
       <Navbar />
 
+      {/* Hidden canvas for jsQR frame processing */}
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+
       <div
         style={{
           maxWidth: "800px",
@@ -251,14 +236,13 @@ export default function CheckIn() {
           padding: isMobile ? "16px" : "20px",
         }}
       >
-
         {/* Hero */}
         <div style={{ marginBottom: "50px" }}>
           <p style={{ color: "#C7FF41", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px" }}>
             Host · Check-In
           </p>
 
-          <h1 style={{ fontSize: isMobile  ? "42px"  : "clamp(48px, 6vw, 80px)", lineHeight: "0.95", margin: "10px 0" }}>
+          <h1 style={{ fontSize: isMobile ? "42px" : "clamp(48px, 6vw, 80px)", lineHeight: "0.95", margin: "10px 0" }}>
             Scan
             <br />
             Tickets
@@ -290,10 +274,7 @@ export default function CheckIn() {
                 background: "#C7FF41",
                 color: "#000",
                 border: "none",
-                width:
-                isMobile
-                  ? "100%"
-                  : "auto",
+                width: isMobile ? "100%" : "auto",
                 padding: "14px 28px",
                 borderRadius: "999px",
                 fontWeight: "700",
@@ -322,10 +303,7 @@ export default function CheckIn() {
                 style={{
                   marginTop: "12px",
                   background: "#1A1A1A",
-                  width:
-                  isMobile
-                    ? "100%"
-                    : "auto",
+                  width: isMobile ? "100%" : "auto",
                   border: "1px solid #232323",
                   color: "#fff",
                   padding: "10px 20px",
@@ -340,12 +318,6 @@ export default function CheckIn() {
 
           {cameraError && (
             <p style={{ color: "#ff6b6b", marginTop: "12px" }}>{cameraError}</p>
-          )}
-
-          {!("BarcodeDetector" in window) && cameraActive && (
-            <p style={{ color: "#FFD166", marginTop: "12px", fontSize: "13px" }}>
-              Auto-scan not supported in this browser. Use manual code entry below.
-            </p>
           )}
         </div>
 
@@ -364,13 +336,7 @@ export default function CheckIn() {
             Paste or type the ticket code if camera scan isn't available.
           </p>
 
-          <div
-            style={{
-              display: "flex",
-              flexDirection: isMobile ? "column" : "row",
-              gap: "12px",
-            }}
-          >
+          <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: "12px" }}>
             <input
               type="text"
               placeholder="Paste ticket code..."
@@ -385,6 +351,7 @@ export default function CheckIn() {
                 padding: "14px 16px",
                 color: "white",
                 fontFamily: "monospace",
+                boxSizing: "border-box",
               }}
             />
             <button
@@ -430,31 +397,18 @@ export default function CheckIn() {
               border: `1px solid ${checkedIn ? "#C7FF41" : "#232323"}`,
               borderRadius: "24px",
               padding: "28px",
+              marginBottom: "40px",
               position: "relative",
               overflow: "hidden",
             }}
           >
-            {/* Top accent */}
-            <div
-              style={{
-                position: "absolute",
-                top: 0, left: 0, right: 0,
-                height: "4px",
-                background: checkedIn ? "#C7FF41" : "#232323",
-              }}
-            />
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "4px", background: checkedIn ? "#C7FF41" : "#232323" }} />
 
-            <div style={{ display: "flex",flexDirection: isMobile ? "column" : "row",justifyContent: "space-between",alignItems: isMobile ? "stretch" : "flex-start", flexWrap: "wrap", gap: "12px" }}>
+            <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", alignItems: isMobile ? "stretch" : "flex-start", gap: "12px" }}>
               <div>
-                <h3 style={{ margin: "0 0 6px", fontSize: "22px" }}>
-                  {scanResult.users?.full_name}
-                </h3>
-                <p style={{ color: "#9CA3AF", margin: "0 0 4px" }}>
-                  {scanResult.users?.email}
-                </p>
-                <p style={{ color: "#9CA3AF", margin: "0" }}>
-                  {scanResult.events?.title}
-                </p>
+                <h3 style={{ margin: "0 0 6px", fontSize: "22px" }}>{scanResult.users?.full_name}</h3>
+                <p style={{ color: "#9CA3AF", margin: "0 0 4px" }}>{scanResult.users?.email}</p>
+                <p style={{ color: "#9CA3AF", margin: 0 }}>{scanResult.events?.title}</p>
               </div>
 
               <div
@@ -466,6 +420,7 @@ export default function CheckIn() {
                   borderRadius: "999px",
                   fontWeight: "600",
                   fontSize: "14px",
+                  alignSelf: "flex-start",
                 }}
               >
                 {checkedIn ? "✓ Checked In" : "Not Checked In"}
@@ -474,15 +429,15 @@ export default function CheckIn() {
 
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "20px" }}>
               <div style={pillStyle}>{scanResult.users?.sex}</div>
-              <div style={pillStyle}>
-                Ticket: {scanResult.ticket_code?.slice(0, 8)}...
-              </div>
-              <div style={pillStyle}>
-                {scanResult.payment_status === "paid" ? "✓ Paid" : scanResult.payment_status}
-              </div>
+              <div style={pillStyle}>Ticket: {scanResult.ticket_code?.slice(0, 8)}...</div>
+              <div style={pillStyle}>{scanResult.payment_status === "paid" ? "✓ Paid" : scanResult.payment_status}</div>
             </div>
 
-            {!checkedIn ? (
+            {scanResult.checked_in && !checkedIn ? (
+              <div style={{ marginTop: "24px", padding: "16px", background: "#2A1A00", border: "1px solid #FFD166", borderRadius: "16px", color: "#FFD166", fontWeight: "600", textAlign: "center" }}>
+                ⚠️ Already Checked In
+              </div>
+            ) : !checkedIn ? (
               <button
                 onClick={handleCheckIn}
                 disabled={checkingIn}
@@ -503,34 +458,14 @@ export default function CheckIn() {
                 {checkingIn ? "Checking In..." : "Check In Guest"}
               </button>
             ) : (
-              <div
-                style={{
-                  marginTop: "24px",
-                  padding: "16px",
-                  background: "#1E2A00",
-                  borderRadius: "16px",
-                  color: "#C7FF41",
-                  fontWeight: "600",
-                  textAlign: "center",
-                }}
-              >
-                Guest Successfully Checked In
+              <div style={{ marginTop: "24px", padding: "16px", background: "#1E2A00", borderRadius: "16px", color: "#C7FF41", fontWeight: "600", textAlign: "center" }}>
+                ✅ Guest Successfully Checked In
               </div>
             )}
 
-            {/* Scan another */}
             <button
               onClick={() => { setScanResult(null); setScanError(null); setCheckedIn(false); }}
-              style={{
-                marginTop: "12px",
-                width: "100%",
-                height: "48px",
-                background: "#1A1A1A",
-                border: "1px solid #232323",
-                color: "#fff",
-                borderRadius: "16px",
-                cursor: "pointer",
-              }}
+              style={{ marginTop: "12px", width: "100%", height: "48px", background: "#1A1A1A", border: "1px solid #232323", color: "#fff", borderRadius: "16px", cursor: "pointer" }}
             >
               Scan Another
             </button>
@@ -541,69 +476,28 @@ export default function CheckIn() {
         <div style={{ marginTop: "50px" }}>
           <h2 style={{ marginBottom: "20px" }}>Guests</h2>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-              isMobile
-                ? "1fr"
-                : "1fr 1fr",
-              gap: "20px",
-            }}
-          >
-            {/* Pending */}
-            <div
-              style={{
-                background: "#141414",
-                border: "1px solid #232323",
-                borderRadius: "24px",
-                padding: "24px",
-              }}
-            >
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "20px" }}>
+            <div style={{ background: "#141414", border: "1px solid #232323", borderRadius: "24px", padding: "24px" }}>
               <h3>Not Checked In ({pendingGuests.length})</h3>
-
               {pendingGuests.length === 0 ? (
                 <p style={{ color: "#9CA3AF" }}>Everyone has checked in.</p>
               ) : (
                 pendingGuests.map((ticket) => (
-                  <div
-                    key={ticket.id}
-                    style={{
-                      padding: "12px 0",
-                      borderBottom: "1px solid #232323",
-                    }}
-                  >
+                  <div key={ticket.id} style={{ padding: "12px 0", borderBottom: "1px solid #232323" }}>
                     <div>{ticket.users?.full_name}</div>
-                    <div style={{ color: "#9CA3AF", fontSize: "14px" }}>
-                      {ticket.users?.email}
-                    </div>
+                    <div style={{ color: "#9CA3AF", fontSize: "14px" }}>{ticket.users?.email}</div>
                   </div>
                 ))
               )}
             </div>
 
-            {/* Checked In */}
-            <div
-              style={{
-                background: "#141414",
-                border: "1px solid #232323",
-                borderRadius: "24px",
-                padding: "24px",
-              }}
-            >
+            <div style={{ background: "#141414", border: "1px solid #232323", borderRadius: "24px", padding: "24px" }}>
               <h3>Checked In ({checkedInGuests.length})</h3>
-
               {checkedInGuests.length === 0 ? (
-                <p style={{ color: "#9CA3AF" }}>No guests have checked in yet.</p>
+                <p style={{ color: "#9CA3AF" }}>No guests checked in yet.</p>
               ) : (
                 checkedInGuests.map((ticket) => (
-                  <div
-                    key={ticket.id}
-                    style={{
-                      padding: "12px 0",
-                      borderBottom: "1px solid #232323",
-                    }}
-                  >
+                  <div key={ticket.id} style={{ padding: "12px 0", borderBottom: "1px solid #232323" }}>
                     <div>{ticket.users?.full_name}</div>
                     <div style={{ color: "#C7FF41", fontSize: "14px" }}>✓ Checked In</div>
                   </div>
@@ -612,7 +506,6 @@ export default function CheckIn() {
             </div>
           </div>
         </div>
-
       </div>
     </>
   );

@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 
 import { supabase } from "../../services/supabase";
@@ -20,11 +20,21 @@ const mobileLink = {
 
 export default function Navbar() {
   const isMobile = useMobile();
+  const navigate = useNavigate();
 
   const [showHosting, setShowHosting] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [initials, setInitials] = useState("?");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [userRole, setUserRole] = useState(null);
+
+  function handleCreateEvent() {
+    if (userRole === "host" || userRole === "admin") {
+      navigate("/create-event");
+    } else {
+      navigate("/host-verification");
+    }
+  }
 
   useEffect(() => {
     async function loadNavbar() {
@@ -51,6 +61,7 @@ export default function Navbar() {
       }
 
       if (profile?.role === "admin") setIsAdmin(true);
+      setUserRole(profile?.role);
 
       const { count } = await supabase
         .from("events")
@@ -124,19 +135,20 @@ export default function Navbar() {
 
             {/* Desktop right actions */}
             <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
-              <Link
-                to="/create-event"
+              <button
+                onClick={handleCreateEvent}
                 style={{
                   background: "#C7FF41",
                   color: "#000",
                   padding: "10px 18px",
                   borderRadius: "999px",
-                  textDecoration: "none",
+                  border: "none",
                   fontWeight: "600",
+                  cursor: "pointer",
                 }}
               >
                 + Create Event
-              </Link>
+              </button>
 
               <Link to="/profile" style={{ textDecoration: "none" }}>
                 <div
@@ -183,9 +195,9 @@ export default function Navbar() {
               Admin
             </Link>
           )}
-          <Link to="/create-event" style={{ ...mobileLink, color: "#C7FF41" }}>
+          <button onClick={handleCreateEvent} style={{ ...mobileLink, color: "#C7FF41", background: "none", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
             + Create Event
-          </Link>
+          </button>
           <Link to="/profile" style={mobileLink}>Profile</Link>
         </div>
       )}
