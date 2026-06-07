@@ -4,8 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import Navbar from "../../../shared/components/Navbar";
 import { supabase } from "../../../services/supabase";
 import { getEventById } from "../../events/services/eventService";
-import { getEventAttendees } from "../../events/services/attendeeService";
-import { getCheckedInTickets } from "../../tickets/services/ticketService";
+import { getEventTickets } from "../../tickets/services/ticketService";
 
 function calculateAge(dob) {
   if (!dob) return "N/A";
@@ -22,8 +21,7 @@ export default function EventAttendees() {
   const navigate = useNavigate();
 
   const [event, setEvent] = useState(null);
-  const [attendees, setAttendees] = useState([]);
-  const [checkedInIds, setCheckedInIds] = useState(new Set());
+  const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("all"); // "all" | "checkedin" | "pending"
 
@@ -49,15 +47,26 @@ export default function EventAttendees() {
 
       setEvent(eventResult.data);
 
-      const [attendeeResult, checkedInResult] = await Promise.all([
-        getEventAttendees(id),
-        getCheckedInTickets(id),
-      ]);
+      // Tickets are source of truth — fetch plain tickets then enrich with user data
+      const ticketResult = await getEventTickets(id);
 
-      if (attendeeResult.data) setAttendees(attendeeResult.data);
+      if (ticketResult.data && ticketResult.data.length > 0) {
+        const userIds = [...new Set(ticketResult.data.map((t) => t.user_id))];
 
-      if (checkedInResult.data) {
-        setCheckedInIds(new Set(checkedInResult.data.map((t) => t.user_id)));
+        const { data: usersData } = await supabase
+          .from("users")
+          .select("id, full_name, email, sex, date_of_birth")
+          .in("id", userIds);
+
+        const usersMap = {};
+        if (usersData) usersData.forEach((u) => (usersMap[u.id] = u));
+
+        const enriched = ticketResult.data.map((t) => ({
+          ...t,
+          users: usersMap[t.user_id] || null,
+        }));
+
+        setTickets(enriched);
       }
 
       setLoading(false);
@@ -66,12 +75,13 @@ export default function EventAttendees() {
     load();
   }, [id, navigate]);
 
-  const filteredAttendees =
-    tab === "checkedin"
-      ? attendees.filter((a) => checkedInIds.has(a.user_id))
-      : tab === "pending"
-      ? attendees.filter((a) => !checkedInIds.has(a.user_id))
-      : attendees;
+  const checkedInTickets = tickets.filter((t) => t.checked_in);
+  const pendingTickets = tickets.filter((t) => !t.checked_in);
+
+  const filteredTickets =
+    tab === "checkedin" ? checkedInTickets
+    : tab === "pending" ? pendingTickets
+    : tickets;
 
   const pillStyle = {
     background: "#1A1A1A",
@@ -99,24 +109,11 @@ export default function EventAttendees() {
 
         {/* Hero */}
         <div style={{ marginBottom: "50px" }}>
-          <p
-            style={{
-              color: "#C7FF41",
-              letterSpacing: "2px",
-              textTransform: "uppercase",
-              fontSize: "14px",
-            }}
-          >
+          <p style={{ color: "#C7FF41", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px" }}>
             Host · Attendees
           </p>
 
-          <h1
-            style={{
-              fontSize: "clamp(48px, 6vw, 80px)",
-              lineHeight: "0.95",
-              margin: "10px 0",
-            }}
-          >
+          <h1 style={{ fontSize: "clamp(48px, 6vw, 80px)", lineHeight: "0.95", margin: "10px 0" }}>
             {loading ? "Loading..." : event?.title}
           </h1>
 
@@ -129,7 +126,7 @@ export default function EventAttendees() {
 
         {!loading && (
           <>
-            {/* Stats row */}
+            {/* Stats */}
             <div
               style={{
                 display: "grid",
@@ -139,9 +136,9 @@ export default function EventAttendees() {
               }}
             >
               {[
-                { label: "Total Joined", value: attendees.length, color: "#fff" },
-                { label: "Checked In", value: checkedInIds.size, color: "#C7FF41" },
-                { label: "Not Yet", value: attendees.length - checkedInIds.size, color: "#9CA3AF" },
+                { label: "Total Tickets", value: tickets.length, color: "#fff" },
+                { label: "Checked In", value: checkedInTickets.length, color: "#C7FF41" },
+                { label: "Not Yet", value: pendingTickets.length, color: "#9CA3AF" },
               ].map(({ label, value, color }) => (
                 <div
                   key={label}
@@ -162,69 +159,67 @@ export default function EventAttendees() {
             {/* Tabs */}
             <div style={{ display: "flex", gap: "10px", marginBottom: "30px", flexWrap: "wrap" }}>
               <button style={tabStyle(tab === "all")} onClick={() => setTab("all")}>
-                All ({attendees.length})
+                All ({tickets.length})
               </button>
               <button style={tabStyle(tab === "checkedin")} onClick={() => setTab("checkedin")}>
-                ✓ Checked In ({checkedInIds.size})
+                ✓ Checked In ({checkedInTickets.length})
               </button>
               <button style={tabStyle(tab === "pending")} onClick={() => setTab("pending")}>
-                Pending ({attendees.length - checkedInIds.size})
+                Not Yet ({pendingTickets.length})
               </button>
             </div>
 
-            {/* Attendee List */}
-            {filteredAttendees.length === 0 ? (
+            {/* Ticket / Attendee List */}
+            {filteredTickets.length === 0 ? (
               <p style={{ color: "#9CA3AF" }}>No attendees in this category.</p>
             ) : (
-              filteredAttendees.map((attendee) => {
-                const isCheckedIn = checkedInIds.has(attendee.user_id);
-                return (
-                  <div
-                    key={attendee.id}
-                    style={{
-                      background: "#141414",
-                      border: `1px solid ${isCheckedIn ? "#2a3d00" : "#232323"}`,
-                      borderRadius: "20px",
-                      padding: "20px",
-                      marginBottom: "12px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      gap: "12px",
-                    }}
-                  >
-                    <div>
-                      <h3 style={{ margin: "0 0 4px" }}>
-                        {attendee.users?.full_name}
-                      </h3>
-                      <p style={{ color: "#9CA3AF", margin: "0 0 10px", fontSize: "14px" }}>
-                        {attendee.users?.email}
-                      </p>
-                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                        <div style={pillStyle}>{attendee.users?.sex}</div>
-                        <div style={pillStyle}>
-                          {calculateAge(attendee.users?.date_of_birth)} yrs
-                        </div>
+              filteredTickets.map((ticket) => (
+                <div
+                  key={ticket.id}
+                  style={{
+                    background: "#141414",
+                    border: `1px solid ${ticket.checked_in ? "#2a3d00" : "#232323"}`,
+                    borderRadius: "20px",
+                    padding: "20px",
+                    marginBottom: "12px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "12px",
+                  }}
+                >
+                  <div>
+                    <h3 style={{ margin: "0 0 4px" }}>{ticket.users?.full_name}</h3>
+                    <p style={{ color: "#9CA3AF", margin: "0 0 10px", fontSize: "14px" }}>
+                      {ticket.users?.email}
+                    </p>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      <div style={pillStyle}>{ticket.users?.sex}</div>
+                      <div style={pillStyle}>
+                        {calculateAge(ticket.users?.date_of_birth)} yrs
+                      </div>
+                      <div style={pillStyle}>
+                        {ticket.payment_status === "paid" ? "✓ Paid" : ticket.payment_status}
                       </div>
                     </div>
-
-                    <div
-                      style={{
-                        padding: "8px 16px",
-                        borderRadius: "999px",
-                        fontSize: "13px",
-                        fontWeight: "600",
-                        background: isCheckedIn ? "#1E2A00" : "#1A1A1A",
-                        color: isCheckedIn ? "#C7FF41" : "#9CA3AF",
-                        border: `1px solid ${isCheckedIn ? "#C7FF41" : "#232323"}`,
-                      }}
-                    >
-                      {isCheckedIn ? "✓ Checked In" : "Not Yet"}
-                    </div>
                   </div>
-                );
-              })
+
+                  <div
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: "999px",
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      background: ticket.checked_in ? "#1E2A00" : "#1A1A1A",
+                      color: ticket.checked_in ? "#C7FF41" : "#9CA3AF",
+                      border: `1px solid ${ticket.checked_in ? "#C7FF41" : "#232323"}`,
+                    }}
+                  >
+                    {ticket.checked_in ? "✓ Checked In" : "Not Yet"}
+                  </div>
+                </div>
+              ))
             )}
 
             {/* Back button */}

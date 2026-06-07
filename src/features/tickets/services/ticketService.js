@@ -53,46 +53,19 @@ export async function checkInTicket(ticketId) {
 export async function getCheckedInTickets(eventId) {
   const { data, error } = await supabase
     .from("tickets")
-    .select(`
-      *,
-      users (
-        id,
-        full_name,
-        email,
-        sex
-      )
-    `)
+    .select("*")
     .eq("event_id", eventId)
-    .eq("checked_in", true)
-    .order("updated_at", { ascending: false });
+    .eq("checked_in", true);
 
   return { data, error };
 }
 
 
-export async function getEventTickets(
-  eventId
-) {
-  const {
-    data,
-    error,
-  } = await supabase
+export async function getEventTickets(eventId) {
+  const { data, error } = await supabase
     .from("tickets")
-    .select(`
-      *,
-      users (
-        id,
-        full_name,
-        email
-      )
-    `)
-    .eq(
-      "event_id",
-      eventId
-    );
+    .select("*")
+    .eq("event_id", eventId);
 
-  return {
-    data,
-    error,
-  };
+  return { data, error };
 }

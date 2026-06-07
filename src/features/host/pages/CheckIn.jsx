@@ -6,6 +6,7 @@ import Navbar from "../../../shared/components/Navbar";
 import { supabase } from "../../../services/supabase";
 import { getEventById } from "../../events/services/eventService";
 import { getTicketByCode, checkInTicket, getEventTickets } from "../../tickets/services/ticketService";
+import { joinEvent } from "../../events/services/attendeeService";
 import useMobile from "../../../hooks/useMobile";
 
 export default function CheckIn() {
@@ -27,6 +28,22 @@ export default function CheckIn() {
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const animFrameRef = useRef(null);
+
+  async function loadTickets(eventId) {
+    const { data } = await getEventTickets(eventId);
+    if (!data || data.length === 0) return;
+
+    const userIds = [...new Set(data.map((t) => t.user_id))];
+    const { data: usersData } = await supabase
+      .from("users")
+      .select("id, full_name, email, sex, date_of_birth")
+      .in("id", userIds);
+
+    const usersMap = {};
+    if (usersData) usersData.forEach((u) => (usersMap[u.id] = u));
+
+    setTickets(data.map((t) => ({ ...t, users: usersMap[t.user_id] || null })));
+  }
 
   useEffect(() => {
     async function load() {
@@ -50,8 +67,7 @@ export default function CheckIn() {
 
       setEvent(result.data);
 
-      const ticketResult = await getEventTickets(id);
-      if (ticketResult.data) setTickets(ticketResult.data);
+      await loadTickets(id);
     }
 
     load();
@@ -196,6 +212,9 @@ export default function CheckIn() {
 
     setCheckingIn(true);
 
+    // Add to attendees table if not already there
+    await joinEvent(scanResult.event_id, scanResult.user_id);
+
     const { error } = await checkInTicket(scanResult.id);
 
     if (error) {
@@ -204,8 +223,7 @@ export default function CheckIn() {
       setCheckedIn(true);
       setScanResult((prev) => ({ ...prev, checked_in: true }));
 
-      const ticketResult = await getEventTickets(id);
-      if (ticketResult.data) setTickets(ticketResult.data);
+      await loadTickets(id);
     }
 
     setCheckingIn(false);
