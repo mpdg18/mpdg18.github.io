@@ -459,6 +459,7 @@ export default function Register() {
 
             <input
               type="date"
+              placeholder="Date of Birth"
               value={
                 dateOfBirth
               }

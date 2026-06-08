@@ -15,6 +15,8 @@ export default function HostVerification() {
   const [loading, setLoading] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [status, setStatus] = useState("pending");
+  const [showTerms, setShowTerms] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   useEffect(() => {
     async function checkVerification() {
@@ -194,7 +196,7 @@ export default function HostVerification() {
             )}
           </div>
         ) : (
-          <form onSubmit={handleSubmit}>
+          <form id="verification-form" onSubmit={handleSubmit}>
 
             <div style={sectionStyle}>
               <h2 style={{ marginBottom: "20px" }}>Personal Details</h2>
@@ -244,7 +246,8 @@ export default function HostVerification() {
             </div>
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => setShowTerms(true)}
               style={{
                 width: "100%",
                 height: "60px",
@@ -257,11 +260,163 @@ export default function HostVerification() {
                 cursor: "pointer",
               }}
             >
-              Submit Application
+              Review & Submit
             </button>
           </form>
         )}
       </div>
+      {/* Terms & Conditions Modal */}
+      {showTerms && (
+        <div
+          onClick={() => setShowTerms(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "20px",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#141414",
+              border: "1px solid #232323",
+              borderRadius: "24px",
+              padding: "32px",
+              maxWidth: "600px",
+              width: "100%",
+              maxHeight: "85vh",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <h2 style={{ margin: "0 0 4px" }}>Host Terms & Conditions</h2>
+            <p style={{ color: "#9CA3AF", fontSize: "14px", marginBottom: "20px" }}>
+              Please read carefully before submitting.
+            </p>
+
+            {/* Scrollable content */}
+            <div
+              style={{
+                overflowY: "auto",
+                flex: 1,
+                paddingRight: "8px",
+                marginBottom: "20px",
+                lineHeight: "1.8",
+                color: "#9CA3AF",
+                fontSize: "14px",
+              }}
+            >
+              {[
+                {
+                  title: "1. Eligibility",
+                  body: "You must be 18 or older to host events on RAVE. By applying, you confirm this is accurate.",
+                },
+                {
+                  title: "2. Event Responsibility",
+                  body: "As a host, you are solely responsible for the safety, legality, and conduct of your event. RAVE is a platform — not an organizer or co-host.",
+                },
+                {
+                  title: "3. Payments & Fees",
+                  body: "All ticket payments are collected through RAVE's UPI system. Hosts receive payouts after the event is verified as completed. RAVE reserves the right to hold funds for disputed or cancelled events.",
+                },
+                {
+                  title: "4. Cancellations",
+                  body: "If you cancel an event, all attendees must be refunded in full. Repeated cancellations may result in account suspension.",
+                },
+                {
+                  title: "5. Prohibited Events",
+                  body: "Events promoting illegal activity, hate, discrimination, or explicit content are strictly banned. Violation results in immediate removal.",
+                },
+                {
+                  title: "6. Alcohol & Age Restrictions",
+                  body: "If your event involves alcohol or is age-restricted, you are legally responsible for verifying attendee ages at entry.",
+                },
+                {
+                  title: "7. Attendee Data",
+                  body: "Attendee data (name, email, age) shared with you through RAVE is for event management only. Misuse of attendee data will result in a permanent ban.",
+                },
+                {
+                  title: "8. Platform Rights",
+                  body: "RAVE reserves the right to remove any event, suspend any host account, or withhold payouts for policy violations.",
+                },
+                {
+                  title: "9. Agreement",
+                  body: "By submitting this application, you agree to these terms and confirm all information provided is truthful.",
+                },
+              ].map(({ title, body }) => (
+                <div key={title} style={{ marginBottom: "16px" }}>
+                  <div style={{ color: "#fff", fontWeight: "600", marginBottom: "4px" }}>{title}</div>
+                  <div>{body}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Accept checkbox */}
+            <label
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: "12px",
+                cursor: "pointer",
+                marginBottom: "20px",
+                color: "#fff",
+                fontSize: "14px",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={termsAccepted}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+                style={{ marginTop: "2px", accentColor: "#C7FF41", width: "16px", height: "16px", flexShrink: 0 }}
+              />
+              I have read and agree to the RAVE Host Terms & Conditions.
+            </label>
+
+            <div style={{ display: "flex", gap: "12px" }}>
+              <button
+                onClick={() => setShowTerms(false)}
+                style={{
+                  flex: 1,
+                  height: "52px",
+                  background: "#1A1A1A",
+                  border: "1px solid #232323",
+                  borderRadius: "14px",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                disabled={!termsAccepted}
+                onClick={() => {
+                  setShowTerms(false);
+                  document.getElementById("verification-form").requestSubmit();
+                }}
+                style={{
+                  flex: 2,
+                  height: "52px",
+                  background: termsAccepted ? "#C7FF41" : "#2a2a2a",
+                  color: termsAccepted ? "#000" : "#666",
+                  border: "none",
+                  borderRadius: "14px",
+                  fontWeight: "700",
+                  fontSize: "16px",
+                  cursor: termsAccepted ? "pointer" : "not-allowed",
+                }}
+              >
+                Submit Application
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

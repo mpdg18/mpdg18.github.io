@@ -453,7 +453,7 @@ export default function CheckIn() {
 
             {scanResult.checked_in && !checkedIn ? (
               <div style={{ marginTop: "24px", padding: "16px", background: "#2A1A00", border: "1px solid #FFD166", borderRadius: "16px", color: "#FFD166", fontWeight: "600", textAlign: "center" }}>
-                ⚠️ Already Checked In
+                Already Checked In
               </div>
             ) : !checkedIn ? (
               <button
@@ -477,7 +477,7 @@ export default function CheckIn() {
               </button>
             ) : (
               <div style={{ marginTop: "24px", padding: "16px", background: "#1E2A00", borderRadius: "16px", color: "#C7FF41", fontWeight: "600", textAlign: "center" }}>
-                ✅ Guest Successfully Checked In
+                Guest Successfully Checked In
               </div>
             )}
 
