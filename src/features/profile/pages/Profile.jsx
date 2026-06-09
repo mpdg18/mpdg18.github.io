@@ -166,21 +166,39 @@ export default function Profile() {
               Edit Profile
             </button>
 
-            <button
-              onClick={handleLogout}
-              style={{
-                background: "#ff4d4f",
-                color: "#fff",
-                border: "none",
-                padding: "12px 18px",
-                borderRadius: "999px",
-                cursor: "pointer",
-                fontWeight: "600",
-                width: isMobile ? "100%" : "auto",
-              }}
-            >
-              Logout
-            </button>
+            {user ? (
+              <button
+                onClick={handleLogout}
+                style={{
+                  background: "#ff4d4f",
+                  color: "#fff",
+                  border: "none",
+                  padding: "12px 18px",
+                  borderRadius: "999px",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                  width: isMobile ? "100%" : "auto",
+                }}
+              >
+                Logout
+              </button>
+            ) : (
+              <button
+                onClick={() => window.location.href = "/login"}
+                style={{
+                  background: "#C7FF41",
+                  color: "#000",
+                  border: "none",
+                  padding: "12px 18px",
+                  borderRadius: "999px",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                  width: isMobile ? "100%" : "auto",
+                }}
+              >
+                Login
+              </button>
+            )}
           </div>
         </div>
 
