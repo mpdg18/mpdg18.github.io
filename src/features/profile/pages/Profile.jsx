@@ -7,6 +7,7 @@ import { getJoinedEvents } from "../../events/services/attendeeService";
 import { getUserCommunities } from "../../communities/services/communityMemberService";
 import { signOut } from "../../auth/services/authService";
 import useMobile from "../../../hooks/useMobile";
+import { useNavigate } from "react-router-dom";
 
 const SEX_OPTIONS = [
   "Male", "Female", "Gay", "Lesbian",
@@ -21,6 +22,7 @@ export default function Profile() {
   const [communities, setCommunities] = useState([]);
   const [hostedEvents, setHostedEvents] = useState([]);
   const [joinedEvents, setJoinedEvents] = useState([]);
+  const navigate = useNavigate();
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -184,7 +186,7 @@ export default function Profile() {
               </button>
             ) : (
               <button
-                onClick={() => window.location.href = "/login"}
+                onClick={() => navigate("/login")}
                 style={{
                   background: "#C7FF41",
                   color: "#000",
