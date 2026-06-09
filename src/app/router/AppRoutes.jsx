@@ -19,6 +19,7 @@ import CheckIn from "../../features/host/pages/CheckIn";
 import EventAttendees from "../../features/host/pages/EventAttendees";
 import AdminDashboard from
 "../../features/admin/pages/AdminDashboard";
+import ResetPassword from "../../features/auth/pages/ResetPassword";
 
 export default function AppRoutes() {
   return (
@@ -107,6 +108,12 @@ export default function AppRoutes() {
         path="/admin"
         element={<AdminDashboard />}
       />
+
+      <Route
+        path="/reset-password"
+        element={<ResetPassword />}
+      />
+
 
     </Routes>
   );
